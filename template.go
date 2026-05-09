@@ -55,7 +55,7 @@ func GenerateStatusPage(store *ResultsStore, services []ServiceConfig, outputPat
 		// Generate uptime bar (showing last 48 checks = ~24h at 30min intervals)
 		barHTML := genUptimeBar(results, 48)
 
-		// Format uptime with 2 decimal places, match githubstatus.com style
+		// Format uptime with 2 decimal places
 		uptimeStr := formatUptime(uptime90d)
 
 		fmt.Fprintf(&b, `
@@ -109,25 +109,26 @@ func genPageHeader(b *strings.Builder, status string, statusClass string, numSer
 <title>Status · shenthar.me</title>
 <style>
   :root {
-    --bg: #ffffff;
-    --bg-secondary: #f6f8fa;
-    --text: #24292f;
-    --text-secondary: #656d76;
-    --text-muted: #8b949e;
-    --border: #d0d7de;
-    --border-light: #e8ecef;
-    --green: #1a7f37;
-    --green-bg: #dafbe1;
-    --green-bar: #1a7f37;
-    --yellow: #9a6700;
-    --yellow-bg: #fff8c5;
-    --yellow-bar: #d4a72c;
-    --red: #cf222e;
-    --red-bg: #ffebe9;
-    --red-bar: #cf222e;
-    --header-bg: #24292f;
-    --header-text: #ffffff;
-    --radius: 6px;
+    --bg: #0a0a0f;
+    --bg-card: #111118;
+    --bg-hover: #181825;
+    --text: #e0e0e8;
+    --text-secondary: #8888a0;
+    --text-muted: #555570;
+    --border: #1e1e2e;
+    --border-light: #16161f;
+    --green: #22c55e;
+    --green-bg: rgba(34,197,94,0.12);
+    --green-bar: #22c55e;
+    --yellow: #eab308;
+    --yellow-bg: rgba(234,179,8,0.12);
+    --yellow-bar: #eab308;
+    --red: #ef4444;
+    --red-bg: rgba(239,68,68,0.12);
+    --red-bar: #ef4444;
+    --nav-bg: #06060b;
+    --nav-text: #8888a0;
+    --radius: 8px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -143,37 +144,38 @@ func genPageHeader(b *strings.Builder, status string, statusClass string, numSer
   /* Navigation bar */
   .nav {
     width: 100%;
-    background: var(--header-bg);
-    padding: 12px 0;
+    background: var(--nav-bg);
+    border-bottom: 1px solid var(--border);
   }
   .nav-inner {
     max-width: 960px;
     margin: 0 auto;
-    padding: 0 24px;
+    padding: 14px 24px;
     display: flex;
     align-items: center;
     gap: 24px;
   }
   .nav-logo {
-    color: var(--header-text);
-    font-size: 14px;
+    color: var(--text);
+    font-size: 15px;
     font-weight: 600;
     text-decoration: none;
     display: flex;
     align-items: center;
     gap: 8px;
   }
-  .nav-logo svg { fill: var(--header-text); }
+  .nav-logo svg { fill: var(--text); }
   .nav-links {
     display: flex;
     gap: 20px;
     font-size: 13px;
   }
   .nav-links a {
-    color: rgba(255,255,255,0.75);
+    color: var(--nav-text);
     text-decoration: none;
+    transition: color 0.15s;
   }
-  .nav-links a:hover { color: var(--header-text); }
+  .nav-links a:hover { color: var(--text); }
 
   /* Main container */
   .container { max-width: 960px; width: 100%; padding: 0 24px; }
@@ -183,32 +185,33 @@ func genPageHeader(b *strings.Builder, status string, statusClass string, numSer
     margin: 40px 0 32px;
     padding: 32px;
     border-radius: var(--radius);
-    border: 1px solid var(--border-light);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
   }
   .status-banner.operational {
-    background: var(--green-bg);
-    border-color: var(--green-bg);
+    border-color: var(--green);
+    box-shadow: 0 0 0 1px rgba(34,197,94,0.05);
   }
   .status-banner.degraded {
-    background: var(--yellow-bg);
-    border-color: var(--yellow-bg);
+    border-color: var(--yellow);
+    box-shadow: 0 0 0 1px rgba(234,179,8,0.05);
   }
   .status-banner.outage {
-    background: var(--red-bg);
-    border-color: var(--red-bg);
+    border-color: var(--red);
+    box-shadow: 0 0 0 1px rgba(239,68,68,0.05);
   }
   .status-icon {
     font-size: 32px;
     margin-bottom: 8px;
   }
+  .status-banner.operational .status-icon { color: var(--green); }
+  .status-banner.degraded .status-icon { color: var(--yellow); }
+  .status-banner.outage .status-icon { color: var(--red); }
   .status-banner h1 {
     font-size: 24px;
     font-weight: 600;
     margin-bottom: 4px;
   }
-  .status-banner.operational h1 { color: var(--green); }
-  .status-banner.degraded h1 { color: var(--yellow); }
-  .status-banner.outage h1 { color: var(--red); }
   .status-banner p {
     font-size: 14px;
     color: var(--text-secondary);
@@ -221,14 +224,18 @@ func genPageHeader(b *strings.Builder, status string, statusClass string, numSer
     align-items: center;
     padding: 12px 0;
     border-bottom: 1px solid var(--border);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
   }
   .component {
     border-bottom: 1px solid var(--border-light);
+    transition: background 0.15s;
+  }
+  .component:hover {
+    background: var(--bg-card);
   }
   .component-row {
     display: flex;
@@ -257,10 +264,11 @@ func genPageHeader(b *strings.Builder, status string, statusClass string, numSer
     flex: 0 0 120px;
   }
   .badge {
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 11px;
+    font-weight: 600;
     padding: 3px 10px;
     border-radius: 20px;
+    letter-spacing: 0.3px;
   }
   .badge.operational { background: var(--green-bg); color: var(--green); }
   .badge.degraded { background: var(--yellow-bg); color: var(--yellow); }
@@ -281,31 +289,33 @@ func genPageHeader(b *strings.Builder, status string, statusClass string, numSer
   .uptime-bar {
     display: flex;
     gap: 2px;
-    height: 16px;
+    height: 18px;
     align-items: stretch;
   }
   .uptime-segment {
     flex: 1;
     border-radius: 2px;
-    min-height: 6px;
+    min-height: 8px;
+    transition: opacity 0.15s;
   }
-  .uptime-segment.up { background: var(--green-bar); opacity: 0.8; }
-  .uptime-segment.down { background: var(--red-bar); opacity: 0.8; }
-  .uptime-segment.unknown { background: var(--border); opacity: 0.4; }
+  .uptime-segment.up { background: var(--green-bar); opacity: 0.7; }
+  .uptime-segment.down { background: var(--red-bar); opacity: 0.7; }
+  .uptime-segment.unknown { background: var(--border); opacity: 0.3; }
+  .component:hover .uptime-segment { opacity: 1; }
 
   /* Footer */
   footer {
     margin-top: 48px;
     margin-bottom: 40px;
-    padding-top: 24px;
-    border-top: 1px solid var(--border-light);
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
     align-items: center;
     font-size: 12px;
     color: var(--text-muted);
   }
-  footer a { color: var(--text-secondary); text-decoration: none; }
+  footer a { color: var(--nav-text); text-decoration: none; }
   footer a:hover { color: var(--text); }
 
   @media (max-width: 768px) {
