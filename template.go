@@ -12,82 +12,74 @@ import (
 func GenerateStatusPage(store *ResultsStore, services []ServiceConfig, outputPath string) error {
 	var b strings.Builder
 
-	genPageHeader(&b)
+	// Count overall status
+	totalUp := 0
+	anyDown := false
+	for _, svc := range services {
+		results := store.GetResults(svc.Name)
+		if len(results) > 0 && results[0].Success {
+			totalUp++
+		} else if len(results) > 0 && !results[0].Success {
+			anyDown = true
+		}
+	}
+
+	overallStatus := "All Systems Operational"
+	overallClass := "operational"
+	if anyDown {
+		overallStatus = "Degraded Performance"
+		overallClass = "degraded"
+	}
+	if totalUp == 0 && len(services) > 0 {
+		overallStatus = "Major Outage"
+		overallClass = "outage"
+	}
+
+	genPageHeader(&b, overallStatus, overallClass, len(services))
 
 	for _, svc := range services {
 		results := store.GetResults(svc.Name)
-		uptime24h := store.GetUptime(svc.Name, 24*time.Hour)
-		uptime7d := store.GetUptime(svc.Name, 7*24*time.Hour)
-		uptime30d := store.GetUptime(svc.Name, 30*24*time.Hour)
+		uptime90d := store.GetUptime(svc.Name, 90*24*time.Hour)
 
 		// Determine current status
-		status := "up"
-		statusClass := "up"
+		statusText := "Operational"
+		statusClass := "operational"
 		if len(results) > 0 {
 			latest := results[0]
 			if !latest.Success {
-				status = "down"
-				statusClass = "down"
-				if latest.Error != "" {
-					status += ": " + latest.Error
-				}
+				statusText = "Degraded"
+				statusClass = "degraded"
 			}
 		}
 
-		// Convert timestamp to relative
-		lastCheckRel := "never"
-		if len(results) > 0 {
-			t, err := time.Parse(time.RFC3339, results[0].Timestamp)
-			if err == nil {
-				lastCheckRel = timeAgo(t)
-			}
-		}
+		// Generate uptime bar (showing last 48 checks = ~24h at 30min intervals)
+		barHTML := genUptimeBar(results, 48)
 
-		// History sparkline: last 30 checks
-		sparkline := genSparkline(results, 30)
+		// Format uptime with 2 decimal places, match githubstatus.com style
+		uptimeStr := formatUptime(uptime90d)
 
 		fmt.Fprintf(&b, `
-    <div class="service-card">
-      <div class="service-header">
-        <div class="service-name">
-          <span class="status-dot %s"></span>
-          <span>%s</span>
+      <div class="component">
+        <div class="component-row">
+          <div class="component-name">
+            <span class="status-indicator %s"></span>
+            <span>%s</span>
+          </div>
+          <div class="component-status">
+            <span class="badge %s">%s</span>
+          </div>
+          <div class="component-uptime">%s%% uptime</div>
+          <div class="component-bar">%s</div>
         </div>
-        <div class="status-badge %s">%s</div>
-      </div>
-      <div class="service-details">
-        <div class="stat">
-          <span class="stat-label">24h</span>
-          <span class="stat-value">%.1f%%</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">7d</span>
-          <span class="stat-value">%.1f%%</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">30d</span>
-          <span class="stat-value">%.1f%%</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Checks</span>
-          <span class="stat-value">%d</span>
-        </div>
-      </div>
-      <div class="service-footer">
-        <div class="last-check">Checked %s</div>
-        <div class="sparkline">%s</div>
-      </div>
-    </div>`,
+      </div>`,
 			statusClass, svc.Name,
-			statusClass, status,
-			uptime24h, uptime7d, uptime30d,
-			len(results),
-			lastCheckRel,
-			sparkline,
+			statusClass, statusText,
+			uptimeStr,
+			barHTML,
 		)
 	}
 
-	genPageFooter(&b, len(services))
+	genPageFooter(&b)
 
 	// Write to output
 	dir := filepath.Dir(outputPath)
@@ -106,7 +98,9 @@ func GenerateStatusPage(store *ResultsStore, services []ServiceConfig, outputPat
 	return nil
 }
 
-func genPageHeader(b *strings.Builder) {
+func genPageHeader(b *strings.Builder, status string, statusClass string, numServices int) {
+	now := time.Now().UTC()
+
 	b.WriteString(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -115,224 +109,297 @@ func genPageHeader(b *strings.Builder) {
 <title>Status · shenthar.me</title>
 <style>
   :root {
-    --bg: #0a0a0f;
-    --card-bg: #111118;
-    --border: #1e1e2a;
-    --text: #c8c8d4;
-    --text-muted: #6b6b7d;
-    --accent: #6c5ce7;
-    --green: #00d68f;
-    --red: #ff6b6b;
-    --radius: 12px;
+    --bg: #ffffff;
+    --bg-secondary: #f6f8fa;
+    --text: #24292f;
+    --text-secondary: #656d76;
+    --text-muted: #8b949e;
+    --border: #d0d7de;
+    --border-light: #e8ecef;
+    --green: #1a7f37;
+    --green-bg: #dafbe1;
+    --green-bar: #1a7f37;
+    --yellow: #9a6700;
+    --yellow-bg: #fff8c5;
+    --yellow-bar: #d4a72c;
+    --red: #cf222e;
+    --red-bg: #ffebe9;
+    --red-bar: #cf222e;
+    --header-bg: #24292f;
+    --header-text: #ffffff;
+    --radius: 6px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 40px 16px;
   }
-  .container { max-width: 900px; width: 100%; }
-  header {
-    text-align: center;
-    margin-bottom: 40px;
+
+  /* Navigation bar */
+  .nav {
+    width: 100%;
+    background: var(--header-bg);
+    padding: 12px 0;
   }
-  header h1 {
-    font-size: 28px;
-    font-weight: 700;
-    margin-bottom: 8px;
-    letter-spacing: -0.5px;
-  }
-  header h1 span { color: var(--accent); }
-  header p {
-    color: var(--text-muted);
-    font-size: 14px;
-  }
-  .grid {
+  .nav-inner {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 24px;
     display: flex;
-    flex-direction: column;
-    gap: 16px;
+    align-items: center;
+    gap: 24px;
   }
-  .service-card {
-    background: var(--card-bg);
-    border: 1px solid var(--border);
+  .nav-logo {
+    color: var(--header-text);
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .nav-logo svg { fill: var(--header-text); }
+  .nav-links {
+    display: flex;
+    gap: 20px;
+    font-size: 13px;
+  }
+  .nav-links a {
+    color: rgba(255,255,255,0.75);
+    text-decoration: none;
+  }
+  .nav-links a:hover { color: var(--header-text); }
+
+  /* Main container */
+  .container { max-width: 960px; width: 100%; padding: 0 24px; }
+
+  /* Status banner */
+  .status-banner {
+    margin: 40px 0 32px;
+    padding: 32px;
     border-radius: var(--radius);
-    padding: 20px 24px;
-    transition: border-color 0.2s;
+    border: 1px solid var(--border-light);
   }
-  .service-card:hover { border-color: #2a2a3a; }
-  .service-header {
+  .status-banner.operational {
+    background: var(--green-bg);
+    border-color: var(--green-bg);
+  }
+  .status-banner.degraded {
+    background: var(--yellow-bg);
+    border-color: var(--yellow-bg);
+  }
+  .status-banner.outage {
+    background: var(--red-bg);
+    border-color: var(--red-bg);
+  }
+  .status-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+  }
+  .status-banner h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .status-banner.operational h1 { color: var(--green); }
+  .status-banner.degraded h1 { color: var(--yellow); }
+  .status-banner.outage h1 { color: var(--red); }
+  .status-banner p {
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+
+  /* Components table */
+  .components-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
-  .service-name {
+  .component {
+    border-bottom: 1px solid var(--border-light);
+  }
+  .component-row {
+    display: flex;
+    align-items: center;
+    padding: 16px 0;
+    gap: 16px;
+  }
+  .component-name {
+    flex: 0 0 220px;
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 500;
   }
-  .status-dot {
-    width: 10px;
-    height: 10px;
+  .status-indicator {
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
   }
-  .status-dot.up { background: var(--green); box-shadow: 0 0 8px rgba(0,214,143,0.4); }
-  .status-dot.down { background: var(--red); box-shadow: 0 0 8px rgba(255,107,107,0.4); }
-  .status-badge {
+  .status-indicator.operational { background: var(--green); }
+  .status-indicator.degraded { background: var(--yellow); }
+  .status-indicator.outage { background: var(--red); }
+  .component-status {
+    flex: 0 0 120px;
+  }
+  .badge {
     font-size: 12px;
-    font-weight: 600;
-    padding: 4px 12px;
+    font-weight: 500;
+    padding: 3px 10px;
     border-radius: 20px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
   }
-  .status-badge.up { background: rgba(0,214,143,0.12); color: var(--green); }
-  .status-badge.down { background: rgba(255,107,107,0.12); color: var(--red); }
-  .service-details {
-    display: flex;
-    gap: 24px;
-    margin-bottom: 12px;
-  }
-  .stat {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .stat-label {
-    font-size: 11px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  .stat-value {
-    font-size: 18px;
-    font-weight: 700;
+  .badge.operational { background: var(--green-bg); color: var(--green); }
+  .badge.degraded { background: var(--yellow-bg); color: var(--yellow); }
+  .badge.outage { background: var(--red-bg); color: var(--red); }
+  .component-uptime {
+    flex: 0 0 100px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-align: right;
     font-variant-numeric: tabular-nums;
   }
-  .service-footer {
+
+  /* Uptime bar */
+  .component-bar {
+    flex: 1;
+    min-width: 100px;
+  }
+  .uptime-bar {
+    display: flex;
+    gap: 2px;
+    height: 16px;
+    align-items: stretch;
+  }
+  .uptime-segment {
+    flex: 1;
+    border-radius: 2px;
+    min-height: 6px;
+  }
+  .uptime-segment.up { background: var(--green-bar); opacity: 0.8; }
+  .uptime-segment.down { background: var(--red-bar); opacity: 0.8; }
+  .uptime-segment.unknown { background: var(--border); opacity: 0.4; }
+
+  /* Footer */
+  footer {
+    margin-top: 48px;
+    margin-bottom: 40px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-light);
     display: flex;
     justify-content: space-between;
     align-items: center;
-  }
-  .last-check {
     font-size: 12px;
     color: var(--text-muted);
   }
-  .sparkline {
-    display: flex;
-    gap: 2px;
-    align-items: flex-end;
-    height: 20px;
-  }
-  .spark-bar {
-    width: 6px;
-    border-radius: 2px 2px 0 0;
-    min-height: 3px;
-    transition: opacity 0.2s;
-  }
-  .spark-bar.up { background: var(--green); opacity: 0.7; }
-  .spark-bar.down { background: var(--red); opacity: 0.7; }
-  .spark-bar:hover { opacity: 1; }
-  footer {
-    margin-top: 48px;
-    text-align: center;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-  footer a { color: var(--accent); text-decoration: none; }
-  @media (max-width: 600px) {
-    body { padding: 20px 12px; }
-    .service-details { gap: 16px; flex-wrap: wrap; }
-    .stat-value { font-size: 16px; }
-    .service-card { padding: 16px; }
+  footer a { color: var(--text-secondary); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  @media (max-width: 768px) {
+    .component-row { flex-wrap: wrap; gap: 8px; }
+    .component-name { flex: 0 0 100%; }
+    .component-status { flex: 0 0 auto; }
+    .component-uptime { flex: 0 0 auto; }
+    .component-bar { flex: 1 1 100%; }
+    .status-banner { padding: 24px; }
+    .status-banner h1 { font-size: 20px; }
+    .nav-inner { padding: 0 16px; }
   }
 </style>
 </head>
 <body>
-<div class="container">
-<header>
-  <h1><span>Status</span> · shenthar.me</h1>
-  <p>Uptime monitoring for all services</p>
-</header>
-<div class="grid">
-`)
+<div class="nav">
+  <div class="nav-inner">
+    <a class="nav-logo" href="https://shenthar.me">
+      <svg height="20" viewBox="0 0 16 16" width="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span>Status</span>
+    </a>
+    <div class="nav-links">
+      <a href="https://shenthar.me">Home</a>
+      <a href="https://github.com/KTS-o7/uptimectl">Source</a>
+    </div>
+  </div>
+</div>
+<div class="container">`)
+
+	fmt.Fprintf(b, `  <div class="status-banner %s">
+    <div class="status-icon">`, statusClass)
+	if statusClass == "operational" {
+		b.WriteString("&#10003;")
+	} else if statusClass == "degraded" {
+		b.WriteString("&#9888;")
+	} else {
+		b.WriteString("&#10007;")
+	}
+	fmt.Fprintf(b, `</div>
+    <h1>%s</h1>
+    <p>Monitoring %d services · Last checked %s</p>
+  </div>
+  <div class="components-header">
+    <span>Components</span>
+    <span>Status</span>
+    <span>Uptime</span>
+    <span>Recent checks</span>
+  </div>`,
+		status, numServices, now.Format("Jan 2, 2006 15:04 UTC"),
+	)
 }
 
-func genPageFooter(b *strings.Builder, numServices int) {
-	now := time.Now().UTC().Format("Mon Jan 02 15:04 UTC 2006")
+func genPageFooter(b *strings.Builder) {
+	now := time.Now().UTC().Format("Jan 2, 2006 15:04 UTC")
 	fmt.Fprintf(b, `
-</div>
-<footer>
-  <p>Monitoring %d services · Last generated %s</p>
-  <p><a href="https://github.com/KTS-o7/uptimectl">uptimectl</a></p>
-</footer>
+  <footer>
+    <span>Status · shenthar.me</span>
+    <span>Updated %s · <a href="https://github.com/KTS-o7/uptimectl">uptimectl</a></span>
+  </footer>
 </div>
 </body>
-</html>`, numServices, now)
+</html>`, now)
 }
 
-// genSparkline generates a sparkline div with colored bars for recent results.
-func genSparkline(results []CheckResult, maxBars int) string {
+// genUptimeBar generates a horizontal bar showing green/red segments for recent checks.
+func genUptimeBar(results []CheckResult, maxSegments int) string {
 	if len(results) == 0 {
-		return `<span style="color:var(--text-muted);font-size:11px;">no data</span>`
+		return `<div class="uptime-bar"><div class="uptime-segment unknown" style="flex:1"></div></div>`
 	}
 
-	n := maxBars
+	n := maxSegments
 	if len(results) < n {
 		n = len(results)
 	}
 
 	var bars strings.Builder
+	bars.WriteString(`<div class="uptime-bar">`)
+
 	for i := n - 1; i >= 0; i-- {
 		r := results[i]
-		cls := "up"
-		if !r.Success {
-			cls = "down"
+		if r.Success {
+			bars.WriteString(`<div class="uptime-segment up"></div>`)
+		} else {
+			bars.WriteString(`<div class="uptime-segment down"></div>`)
 		}
-		// Scale height based on latency (min 3px, max 18px)
-		h := 3 + (r.LatencyMs * 15 / 2000)
-		if h > 18 {
-			h = 18
-		}
-		if h < 3 {
-			h = 3
-		}
-		fmt.Fprintf(&bars, `<div class="spark-bar %s" style="height:%dpx" title="%s"></div>`, cls, h, r.Timestamp)
 	}
 
+	bars.WriteString(`</div>`)
 	return bars.String()
 }
 
-func timeAgo(t time.Time) string {
-	d := time.Since(t)
-	if d < time.Minute {
-		return "just now"
+func formatUptime(uptime float64) string {
+	if uptime >= 99.995 {
+		return "100.00"
 	}
-	if d < time.Hour {
-		m := int(d.Minutes())
-		if m == 1 {
-			return "1 min ago"
-		}
-		return fmt.Sprintf("%d mins ago", m)
-	}
-	if d < 24*time.Hour {
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", h)
-	}
-	days := int(d.Hours() / 24)
-	if days == 1 {
-		return "1 day ago"
-	}
-	return fmt.Sprintf("%d days ago", days)
+	return fmt.Sprintf("%.2f", uptime)
 }
