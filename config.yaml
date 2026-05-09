@@ -1,0 +1,43 @@
+# Services to monitor
+services:
+  - name: "VPS"
+    url: "https://status.shenthar.me/health"
+    method: GET
+    timeout: 10s
+    expected_status: 200
+
+  - name: "Books (Calibre-Web)"
+    url: "https://books.shenthar.me"
+    method: GET
+    timeout: 15s
+    expected_status: 200
+
+  - name: "Sync (Obsidian LiveSync)"
+    url: "https://sync.shenthar.me"
+    method: GET
+    timeout: 15s
+    expected_status: 401
+
+  - name: "Chat (Element Web)"
+    url: "https://chat.shenthar.me"
+    method: HEAD
+    timeout: 15s
+    expected_status: 200
+
+  - name: "Ledgerify"
+    url: "http://127.0.0.1:3000/health"
+    method: GET
+    timeout: 10s
+    expected_status: 200
+
+# How often to run checks (Go duration format)
+interval: 30m
+
+# Days of history to keep
+history_days: 30
+
+# Output path for the status page HTML
+output_path: "/var/www/status/index.html"
+
+# Data file for storing check results
+data_path: "/opt/uptimectl/data/results.json"
