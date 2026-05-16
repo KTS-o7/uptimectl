@@ -18,9 +18,9 @@ services:
     timeout: 15s
     expected_status: 401
 
-  - name: "Chat (Element Web)"
-    url: "https://chat.shenthar.me"
-    method: HEAD
+  - name: "AI (FreeSeek Proxy)"
+    url: "https://ai.shenthar.me"
+    method: GET
     timeout: 15s
     expected_status: 200
 
